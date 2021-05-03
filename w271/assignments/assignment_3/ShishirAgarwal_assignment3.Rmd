@@ -1,0 +1,620 @@
+---
+title: "Shishir Agarwal - W271 Assignment 3"
+geometry: margin=1in
+output:
+  pdf_document: null
+  word_document: default
+  toc: yes
+  number_sections: yes
+subtitle: Due 11:59pm Pacific Time Sunday April 11 2021
+fontsize: 11pt
+---
+
+```{r, warning=FALSE, message=FALSE}
+rm(list = ls())
+knitr::opts_chunk$set(tidy.opts=list(width.cutoff=60),tidy=TRUE)
+# Load Libraries
+library(ggplot2)
+library(GGally)
+library(stargazer)
+library(tidyverse)
+library(patchwork)
+library(tsibble)
+library(fable)
+library(fpp2)
+library(fpp3)
+
+library(car)
+library(dplyr)
+library(Hmisc)
+
+library(forecast)
+library(astsa)
+library(xts)
+library(vars)
+library(zoo)
+library(tseries)
+library(tsibble)
+```
+
+```{r, warning=FALSE, message=FALSE}
+setwd("/home/jovyan/r_bridge/student_work/shagarwa/Assignment#3")
+options(scipen=999)
+```
+
+\newpage
+# Question 1 (2.5 points) 
+
+**Time Series Linear Model**
+
+The data set `Q1.csv` concerns the monthly sales figures of a shop which opened in January 1987 and sells gifts, souvenirs, and novelties. The shop is situated on the wharf at a beach resort town in Queensland, Australia. The sales volume varies with the seasonal population of tourists. There is a large influx of visitors to the town at Christmas and for the local surfing festival, held every March since 1988. Over time, the shop has expanded its premises, range of products, and staff.
+
+```{r, warning=FALSE, message=FALSE}
+# Read the monthly sales data as a dataframe
+ss.df <- read.csv("Q1.csv", header=TRUE, sep=",")
+# Convert the dataframe into ts object
+ss.ts <- ts(ss.df$sales, frequency = 12, start = c(1987,1), end = c(1993,12))
+# Convert the dataframe into tsibble object
+ss.tsibble <- tsibble(month = yearmonth(ss.df$X), sales = ss.df$sales, index = month)
+#Quick EDA
+#plot(aggregate(ss.ts))
+#monthplot(ss.ts, phase = cycle(ss.ts))
+#boxplot(ss.ts ~ cycle(ss.ts))
+```
+**a)** Produce a time plot of the data and describe the patterns in the graph. Identify any unusual or unexpected fluctuations in the time series.
+
+From the time plot we notice the monthly sales is trending upwards and it is seasonal in nature. The monthly sales consistently peaks in December and is lowest in January. In month of March we see a little bump in sales compared to Feb every year and most probably it is due to the festival. Also, there is persistent drop in year-to-year sales between year 1990 and year 1991 for month of January and March. Similarly, there is persistent drop in year-to-year sales between year 1989 and year 1990 for month of Aug, Sept, Oct, Dec. Lastly, the fluctuations between Dec and Jan keeps increasing with every passing year execpt bewteen 1990-1991.
+
+```{r, warning=FALSE, message=FALSE}
+#Time Plot of Data
+ss.tsibble %>%
+  autoplot() +
+  labs(
+    title = "Monthly Sales of Gift Shop from 1987-1993",
+    subtitle = "Queensland Australia",
+    y = "Sales",
+    x = "Time(Monthly)"
+    )
+#Time Plot of Data for 2 Years
+ss.tsibble %>%
+  filter(year(month) > 1991) %>% 
+  autoplot() +
+  labs(
+    title = "Monthly Sales of Gift Shop from 1992-1994",
+    subtitle = "Queensland Australia",
+    y = "Sales",
+    x = "Time(Monthly)"
+    )
+#Seasonal Time Plot of Data
+ss.tsibble %>%
+  gg_season(sales, labels = "both") +
+  labs(
+    title = "Monthly Sales of Gift Shop from 1987-1993",
+    subtitle = "Seasonal Plot",
+    y = "Sales"
+    )
+#Sub Series Time Plot of Data
+ss.tsibble %>%
+  gg_subseries(sales) +
+  labs(
+    title = "Monthly Sales of Gift Shop from 1987-1993",
+    subtitle = "Sub-Series Plot",
+    y = "Sales"
+    )
+```
+**b)** Explain why it is necessary to take logarithms of these data before fitting a model.
+
+Because we see fluctuation between Jan and Dec sales keeps increasing with every year, we take the log to reduce the amount of variance in our analysis. It is unrealistic to assume the variation will continue to grow at a same pace. Also, we know the value of sales will be a positive number more than zero and taking a log helps us with better forecasting. Lastly, by taking the log we are still able to interpret the regression results in a meaningful manner.
+
+**c)** Use R to fit a regression model to the logarithms of these sales data with a linear trend, seasonal dummies and a "surfing festival" dummy variable.
+
+```{r, warning=FALSE, message=FALSE}
+#create a dummy variable for the surfing festival
+surf <- ifelse(test = cycle(ss.ts) == 3, yes = 1, no = 0)
+#the surfing festival in 1988 did not happen
+surf[3] <- 0
+
+#fit the model using fable
+ss.fit.TSLM <- ss.tsibble %>%
+  model(TSLM(log(sales) ~ trend() + season() + surf))
+report(ss.fit.TSLM)
+
+#fit the model using forecast
+ss.fit.tslm.log <- tslm(ss.ts ~ trend + season + surf, lambda = 0)
+summary(ss.fit.tslm.log)
+```
+
+**d)** Plot the residuals against time and against the fitted values. Do these plots reveal any problems with the model?
+
+Yes, both the plots show violation of zero conditional mean and homoskedasticity. When we plot residuals against time, we see a persistent pattern instead of white noise. For example, we see a pattern between 1988-1990 which is repeated between 1992-1994. When we plot residuals against fitted values we see zero conditional mean is violated and the variance is not constant across the fitted values. Thus, we notice the primary assumptions of linear regression are violated.
+
+```{r, warning=FALSE, message=FALSE}
+#Introspect the Fitted Model
+#augment(ss.fit.TSLM)
+
+#Plot Residuals Against Time
+augment(ss.fit.TSLM) %>%
+  autoplot(.resid) +
+  labs(x = "Time", y = "Residuals") +
+  labs(
+    title = "Residual against Time (1987-1993)",
+    subtitle = "Linear Regression"
+    )
+
+#Plot Residual Against Fitted under log Transformation
+augment(ss.fit.TSLM) %>%
+  ggplot(aes(x = log(.fitted), y = .innov)) +
+  geom_point() + 
+  geom_smooth(method = "loess") +
+  labs(x = "Fitted", y = "Residuals") +
+  labs(
+    title = "Residual against Fitted under Log Transform",
+    subtitle = "Linear Regression"
+    )
+```
+**e)** Do boxplots of the residuals for each month. Does this reveal any problems with the model?
+
+Yes, the boxplot shows variance of residuals is not constant from month to month. Also, we notice seasonality. Thus, it confirms our doubt on the validity of the linear regression model and its suitability for inferencing. 
+
+```{r, warning=FALSE, message=FALSE}
+augment(ss.fit.TSLM) %>%
+  mutate(Monthly = factor(month(month))) %>% 
+  ggplot(aes(x = Monthly, y = .innov)) +
+  geom_boxplot() +
+  geom_jitter() +
+  labs(x = "Month", y = "Residuals") +
+  labs(
+    title = "Residual under Log Transform By Month",
+    subtitle = "Linear Regression"
+    )
+```
+
+**f)** What do the values of the coefficients tell you about each variable?
+
+The values of the coefficients cannot be trusted for inference since few key assumptions of linear regression are violated. However we do notice there is a positive uptrend (trend is positively correlated) in sales month-over-month. Also, we notice strong seasonality and on average sales in other months are higher compared to sales in January (base month). Thus, we notice the coefficients for all the seasonal dummy variables are positively correlated. Also, we notice on average sales in any given month are higher than sales of preceding month except in August. Thus, we notice and increasing trend in the seasonal coefficients. Lastly, we notice the month of March in itself is not significant however the dummy variable $surf$ is. This shows the festival makes a difference. In general the results are in-line with our observations in the time series plot. We also notice, this model has a high $R^2$ values, we could still use the model for predicting and forecasting.
+
+**g)** What does the Breusch-Godfrey test tell you about your model?
+
+The low p-value means we reject the null hypothesis of no serial correlation. This, tells us there is serial correlation remaining in the residuals and it has not been eliminated. This means we can still use our model for predicting and forecasting however the predicting interval will be wider due to serial correlation. 
+
+```{r, warning=FALSE, message=FALSE}
+lmtest::bgtest(ss.fit.tslm.log)
+```
+
+**h)** Regardless of your answers to the above questions, use your regression model to predict the monthly sales for 1994, 1995, and 1996. Produce prediction intervals for each of your forecasts.
+
+**i)** Transform your predictions and intervals to obtain predictions and intervals for the raw data.
+
+```{r, warning=FALSE, message=FALSE}
+surf <- rep(c(0,0,1,0,0,0,0,0,0,0,0,0),3)
+newdata.df <- data.frame(surf=surf)
+surf_forecast <- forecast(ss.fit.tslm.log, h = 36, new_data = newdata.df)
+surf_forecast %>% 
+  autoplot() +
+  autolayer(ss.ts, sales) +
+  labs(x = "Month", y = "Sales") +
+  labs(
+    title = "3-year Forecast for 1994, 1995, 1996",
+    subtitle = "Linear Regression"
+    )
+surf_forecast
+
+surf_forecast_scenarios <- scenarios(
+  "March Festival" = new_data(ss.tsibble, 36) %>%
+    mutate(surf = rep(c(0,0,1,0,0,0,0,0,0,0,0,0),3)),
+  names_to = "Scenario"
+)
+surf_forecast_TSLM <- forecast(ss.fit.TSLM, new_data = surf_forecast_scenarios)
+surf_forecast_TSLM %>% 
+  autoplot() +
+  autolayer(ss.tsibble, sales) +
+  labs(x = "Month", y = "Sales") +
+  labs(
+    title = "3-year Forecast for 1994, 1995, 1996",
+    subtitle = "Linear Regression"
+    )
+surf_forecast_TSLM
+```
+
+**j)** How could you improve these predictions by modifying the model?
+
+There are number of ways to improve the model. One of the ways to improving the predictions would be to use the Auto Regressive or Moving Average models that exploit the serial correlation within the time series model. Thus, we will explore using the SARIMA model to capture the stochastic process that is being used to generate the time series and use the model to improve the predictions.
+
+\newpage
+
+# Question 2 (2.5 points)
+
+**Cross-validation**
+
+This question is based on section 5.9 of *Forecasting: Principles and Practice Third Edition* (Hyndman and Athanasopoulos). 
+
+The `gafa_stock` data set from the `tsibbledata` package contains historical stock price data for Google, Amazon, Facebook and Apple.
+
+The following code fits the following models to a 2015 training set of Google stock prices: 
+
+* `MEAN()`: the *average method*, forecasting all future values to be equal to the mean of the historical data
+
+* `NAIVE()`: the *naive method*, forecasting all future values to be equal to the value of the latest observation  
+
+* `RW()`: the *drift method*, forecasting all future values to continue following the average rate of change between the last and first observations. This is equivalent to forecasting using a model of a random walk with drift.
+
+```{r  message=FALSE}
+library(fpp3)
+#library(tidyverse)
+#library(lubridate)
+#library(tsibble)
+#library(fable)
+
+# Re-index based on trading days
+google_stock <- gafa_stock %>%
+  filter(Symbol == "GOOG") %>%
+  mutate(day = row_number()) %>%
+  update_tsibble(index = day, regular = TRUE)
+
+# Filter the year of interest
+google_2015 <- google_stock %>% filter(year(Date) == 2015)
+
+# Fit models
+google_fit <- google_2015 %>%
+  model(
+    Mean = MEAN(Close),
+    Naive = NAIVE(Close),
+    Drift = RW(Close ~ drift())
+  )
+```
+
+The following creates a test set of January 2016 stock prices, and plots this against the forecasts from the average, naive and drift models:
+
+```{r message=FALSE}
+google_jan_2016 <- google_stock %>%
+  filter(yearmonth(Date) == yearmonth("2016 Jan"))
+
+google_fc <- google_fit %>% forecast(google_jan_2016)
+
+# Plot the forecasts
+google_fc %>%
+  autoplot(google_2015, level = NULL) +
+    autolayer(google_jan_2016, Close, color='black') +
+    ggtitle("Google stock (daily ending 31 Dec 2015)") +
+    xlab("Day") + ylab("Closing Price (US$)") +
+    guides(colour=guide_legend(title="Forecast"))
+```
+
+Forecasting performance can be measured with the `accuracy()` function:
+
+```{r message=FALSE}
+accuracy(google_fc, google_stock)
+```
+
+These measures compare model performance over the entire test set. An alternative version of pseudo-out-of-sample forecasting is *time series cross-validation*.
+
+In this procedure, there may be a series of 'test sets', each consisting of one observation and corresponding to a 'training set' consisting of the prior observations. 
+
+```{r message=FALSE}
+# Time series cross-validation accuracy
+google_2015_tr <- google_2015 %>%
+  slice(1:(n()-1)) %>%
+  stretch_tsibble(.init = 3, .step = 1)
+
+fc <- google_2015_tr %>%
+  model(RW(Close ~ drift())) %>%
+  forecast(h=1)
+
+fc %>% accuracy(google_2015)
+```
+
+**a)** Define the accuracy measures returned by the `accuracy` function. Explain how the given code calculates these measures using cross-validation. 
+
+A time series cross-validation procedure uses series of test sets, each consisting of a single observation. The corresponding training set consists only of observations that occurred prior to the observation that forms the test set. Since it is not possible to obtain a reliable forecast based on a small training set, the earliest observations are not considered as test sets. For example, we could start with a training set of length 3 and increase the size of successive training set by 1. The forecast accuracy is computed by averaging over the test sets. The accuracy measure calculates forecasting error by taking the difference between the observed value and the predicted value on a test data set and averaging it for cross-validation. It calculates following errors
+
+* ME (Mean Error)
+* RMSE (Root Mean Square Error)
+* MAE (Mean Absolute Error)
+* MPE (Mean Percentage Error)
+* MAPE (Mean Absolute Percentage Error)
+* MASE (Mean Absolute Scaled Error)
+* RMSSE (Root Mean Squared Scaled Error)
+* ACF1 (First Coefficient of Autocorrelation Function)
+
+
+
+**b)** Obtain Facebook stock data from the `gafa_stock` dataset. 
+
+```{r}
+facebook_stock <- gafa_stock %>%
+  filter(Symbol == "FB") %>%
+  mutate(day = row_number()) %>%
+  update_tsibble(index = day, regular = TRUE)
+```
+
+Use cross-validation to compare the RMSE forecasting accuracy of naive and drift models for the *Volume* series, as the forecast horizon is allowed to vary.
+
+```{r}
+# Create training data using 2015 stock data
+fb_2015 <- facebook_stock %>% filter(year(Date) == 2015)
+
+# Train the model using 2015 stock data
+fb_fit <- fb_2015 %>%
+  model(
+    Naive = NAIVE(Volume),
+    Drift = RW(Volume ~ drift())
+  )
+
+# Create Test Data using 2016 stock data
+facebook_stock_2016 <- facebook_stock %>%
+  filter(yearmonth(Date) == yearmonth("2016 Jan"))
+
+# Using 2015 Data, Forecast for 2016
+fb_fc <- fb_fit %>% forecast(facebook_stock_2016)
+
+# Calculate Accuracy against the 2016 Stock Test Data
+accuracy(fb_fc, facebook_stock)
+
+# Calculate Accuracy against the 2015 Stock Training Data
+fb_fit %>% accuracy()
+
+# Time series cross-validation accuracy
+fb_2015_tr <- fb_2015 %>%
+  slice(1:(n()-1)) %>%
+  stretch_tsibble(.init = 3, .step = 1)
+
+fc <- fb_2015_tr %>%
+  model(
+    Naive_Vol = NAIVE(Volume),
+    Drift_Vol = RW(Volume ~ drift())
+    ) %>%
+  forecast(h=1)
+
+fc %>% accuracy(fb_2015)
+
+fc <- fb_2015_tr %>%
+  model(
+    Naive_Vol = NAIVE(Volume),
+    Drift_Vol = RW(Volume ~ drift())
+    ) %>%
+  forecast(h = 8) %>%
+  group_by(.id) %>%
+  mutate(h = row_number()) %>%
+  ungroup()
+
+fc %>%
+  filter(.model == "Naive_Vol") %>% 
+  accuracy(facebook_stock, by = c("h", ".model")) %>%
+  ggplot(aes(x = h, y = RMSE)) +
+  geom_point() +
+  labs(
+    title = "RMSE vs.Forecast Horizon - Naive Model",
+    subtitle = "Facebook Stock Volume"
+    )
+
+fc %>%
+  filter(.model == "Drift_Vol") %>% 
+  accuracy(facebook_stock, by = c("h", ".model")) %>%
+  ggplot(aes(x = h, y = RMSE)) +
+  geom_point() +
+  labs(
+    title = "RMSE vs.Forecast Horizon - Drift Model",
+    subtitle = "Facebook Stock Volume"
+    )
+```
+
+
+\newpage
+# Question 3 (2.5 points): 
+
+**ARIMA model** 
+
+Consider `fma::sheep`, the sheep population of England and Wales from 1867–1939.
+
+```{r message=FALSE}
+#install.packages('fma')
+library(fma)
+head(fma::sheep)
+sheep.ts <- fma::sheep
+sheep.tsibble <- as_tsibble(sheep.ts)
+```
+
+**a)** Produce a time plot of the time series.
+
+```{r message=FALSE}
+#Time Plot of Data
+sheep.ts %>%
+  autoplot() +
+  labs(
+    title = "Sheep population from 1867 to 1939",
+    subtitle = "England and Wales",
+    y = "Sheep",
+    x = "Time(Yearly)"
+    )
+```
+
+**b)** Assume you decide to fit the following model: 
+$$y_t=y_{t-1}+\phi_1(y_{t-1}-y_{t-2})+\phi_2(y_{t-2}-y_{t-3})+\phi_3(y_{t-3}-y_{t-4})+\epsilon_t$$
+where $\epsilon_t$ is a white noise series. 
+
+What sort of ARIMA model is this (i.e., what are p, d, and q)?
+
+ARIMA(3,1,0)
+
+Express this ARIMA model using backshift operator notation.
+
+$$(1-B)[1 - \phi_1B - \phi_2B^2 - \phi_3B^3]$$
+
+**c)** By examining the ACF and PACF of the differenced data, explain why this model is appropriate.
+
+The model is appropriate because with 1 differencing we get a PACF which cuts of after 3 which shows it is a AR model with 3. Also, ACF model dampens slowly without providing conclusive evidence on MA model.
+
+```{r message=FALSE}
+#Time Plot of Data
+sheep.ts %>% diff() %>% ggtsdisplay(lag.max = 144)
+```
+
+**d)** The last five values of the series are given below:
+
+|Year              | 1935| 1936| 1937| 1938| 1939|
+|:-----------------|----:|----:|----:|----:|----:|
+|Millions of sheep | 1648| 1665| 1627| 1791| 1797|
+
+
+The estimated parameters are $\phi_1=0.42$, 
+$\phi_2=-0.20$, and $\phi_3=-0.30$.
+
+Without using the forecast function, calculate forecasts for the next three years (1940–1942).
+
+$$y_{1940} =y_{1939}+\phi_1(y_{1939}-y_{1938})+\phi_2(y_{1938}-y_{1937})+\phi_3(y_{1937}-y_{1936})+\epsilon_t$$
+$$y_{1940} = 1797 + 0.42(1797 - 1791) + (-0.2)(1791 - 1627) + (-0.3)(1627 - 1665)$$
+$$y_{1940} = 1778.12$$
+$$y_{1941} =y_{1940}+\phi_1(y_{1940}-y_{1939})+\phi_2(y_{1939}-y_{1938})+\phi_3(y_{1938}-y_{1937})+\epsilon_t$$
+$$y_{1941} = 1778.12 + 0.42(1778.12 - 1797) + (-0.2)(1797 - 1791) + (-0.3)(1791 - 1627)$$
+$$y_{1941} = 1719.79$$
+$$y_{1942} =y_{1941}+\phi_1(y_{1941}-y_{1940})+\phi_2(y_{1940}-y_{1939})+\phi_3(y_{1939}-y_{1938})+\epsilon_t$$
+
+$$y_{1942} = 1719.79 + 0.42(1719.79 - 1778.12) + (-0.2)(1778.12 - 1797) + (-0.3)(1797 - 1791)$$
+
+$$y_{1942} = 1697.27$$
+
+**e)** Find the roots of your model's characteristic equation and explain their significance.
+
+For the model to provide a valid forecast, it is important for us to meet the stationarity condition. The stationarity condition requires complex roots of model's characteristic equation to lie outside a unit circle. In other words the mod value of roots needs to be greater than 1. In this specific case for ARIMA(3,1,0) we find the mod value of roots to be $1.255717 2.083645 1.255717$. Since mod value of all roots is greater than 1 we can safely assume stationarity for our AR model. 
+
+```{r}
+sheep_model <-  sheep.tsibble %>% model(arima1 = ARIMA(value ~ pdq(3,1,0))) 
+
+# model properties
+sheep_model %>% report(fit)
+
+# residual characteristics
+sheep_model %>% gg_tsresiduals()
+
+# test for autocorrelaton of residuals
+augment(sheep_model) %>% features(.resid, ljung_box)
+
+# model roots (one real, two complex)
+glance(sheep_model)[['ar_roots']]
+
+# inverse roots within unit circle
+gg_arma(sheep_model)
+
+# modulus of roots exceed unity
+Mod(polyroot(c(1, -coef(sheep_model)[['estimate']])))
+
+#sheep_model %>% forecast(h = 8)
+```
+
+\newpage
+# Question 4 (2.5 points): 
+
+**Vector autoregression**
+
+Annual values for real mortgage credit (RMC), real consumer credit (RCC) and real disposable personal income (RDPI) for the period 1946-2006 are recorded in `Q5.csv`. All of the observations are measured in billions of dollars, after adjustment by the Consumer Price Index (CPI). Conduct an EDA on these data and develop a VAR model for the period 1946-2003. Forecast the last three years, 2004-2006, conducting residual diagnostics. Examine the relative advantages of logarithmic transformations and the use of differences.
+
+
+```{r, warning=FALSE, message=FALSE}
+# Read the monthly sales data as a dataframe and create ts objects
+credit.df <- read.csv("Q4.csv", header=TRUE, sep=",")
+
+credit.ts <- ts(credit.df[, 2:4], start = c(1946), end = c(2006))
+credit.tsibble <- as_tsibble(credit.df, index = Year)
+
+credit.tsibble.wide <- as_tsibble(credit.ts, pivot_longer = FALSE)
+credit.tsibble.long <- as_tsibble(credit.ts, pivot_longer = TRUE)
+
+rmc.ts <- ts(credit.df$RMC, start = c(1946), end = c(2006))
+rcc.ts <- ts(credit.df$RCC, start = c(1946), end = c(2006))
+rdpi.ts <- ts(credit.df$RDPI, start = c(1946), end = c(2006))
+
+#Quick EDA
+credit.ts %>% autoplot() +
+    labs(
+    title = "RMC, RCC, RDPI from 1946–2006",
+    subtitle = "USA",
+    y = "(in billions)",
+    x = "(in years)"
+    )
+
+credit.tsibble.long %>%
+  ggplot(aes(x = index, y = value, group = key)) + 
+  geom_line() + 
+  facet_grid(vars(key), scales = "free_y") +
+  labs(
+    title = "RMC, RCC, RDPI from 1946–2006",
+    subtitle = "USA",
+    y = "(in billions)",
+    x = "(in years)"
+    )
+
+qplot(RMC, RCC, data = credit.tsibble, main = "RMC and RCC Scatter Plot")
+cor(rmc.ts, rcc.ts)
+ccf(rmc.ts, rcc.ts)
+summary(lm(rcc.ts ~ rmc.ts))
+
+qplot(RMC, RDPI, data = credit.tsibble, main = "RMC and RDPI Scatter Plot")
+cor(rmc.ts, rdpi.ts)
+ccf(rmc.ts, rdpi.ts)
+summary(lm(rdpi.ts ~ rmc.ts))
+
+qplot(RCC, RDPI, data = credit.tsibble, main = "RCC and RDPI Scatter Plot")
+cor(rcc.ts, rdpi.ts)
+ccf(rcc.ts, rdpi.ts)
+summary(lm(rdpi.ts ~ rcc.ts))
+
+credit.tsibble[,2:4] %>% GGally::ggpairs()
+
+rmc.ts %>% ggtsdisplay(lag.max = 144, main = "RMC")
+rcc.ts %>% ggtsdisplay(lag.max = 144, main = "RCC")
+rdpi.ts %>% ggtsdisplay(lag.max = 144, main = "RDPI")
+```
+
+```{r}
+# ADF Test (Each is not stationary)
+adf.test(credit.tsibble$RMC)
+adf.test(credit.tsibble$RCC)
+adf.test(credit.tsibble$RDPI)
+
+# PO Test (The series are not co-integrated)
+po.test(cbind(rmc.ts, rcc.ts))
+po.test(cbind(rmc.ts, rdpi.ts))
+po.test(cbind(rcc.ts, rdpi.ts))
+po.test(credit.tsibble)
+po.test(credit.ts)
+```
+
+```{r}
+# Select the lag parameter based on SC, In our case p = 2
+VARselect(credit.ts, lag.max = 8, type = "both")
+```
+
+```{r}
+#Select Model
+credit.var <- VAR(credit.ts, p = 2, type = "both")
+summary(credit.var)
+```
+
+```{r}
+# Test of normality:
+credit.var.norm <- normality.test(credit.var, multivariate.only = TRUE)
+credit.var.norm
+credit.var %>% resid %>% .[, "RMC"] %>% qqPlot
+credit.var %>% resid %>% .[, "RCC"] %>% qqPlot
+credit.var %>% resid %>% .[, "RDPI"] %>% qqPlot
+
+# Test of no serial correlation:
+credit.var.ptasy <- serial.test(credit.var, lags.pt = 12, type = "PT.asymptotic")
+credit.var.ptasy
+
+# Test of the absence of ARCH effect:
+credit.var.arch <- arch.test(credit.var)
+credit.var.arch
+
+credit.var %>% resid %>% acf
+credit.var %>% resid %>% pacf
+```
+
+```{r}
+forecast(credit.var) %>%
+  autoplot() + xlab("Date")
+```
+
+```{r}
+credit.var %>% predict(n.ahead = 3, ci = 0.95) %>% fanchart()
+```

@@ -1,0 +1,665 @@
+---
+title: "Shishir Agarwal - W271 Assignment 2"
+geometry: margin=1in
+output:
+  pdf_document: null
+  word_document: default
+  toc: yes
+  number_sections: yes
+subtitle: Due Sunday 7 March 2021 11:59pm
+fontsize: 11pt
+---
+
+```{r, warning=FALSE, message=FALSE}
+rm(list = ls())
+knitr::opts_chunk$set(tidy.opts=list(width.cutoff=60),tidy=TRUE)
+# Load Libraries
+library(car)
+library(Hmisc)
+library(skimr)
+library(ggplot2)
+library(stargazer)
+library(tidyverse)
+library(GGally)
+library(patchwork)
+library(MASS)
+library(mcprofile)
+library(vcd)
+library(nnet)
+```
+
+```{r, warning=FALSE, message=FALSE}
+setwd("/home/jovyan/r_bridge/student_work/shagarwa/Assignment#2")
+```
+
+\newpage
+# 1. Strategic Placement of Products in Grocery Stores (5 points)
+
+These questions are taken from Question 12 of chapter of the textbook.
+
+*In order to maximize sales, items within grocery stores are strategically placed to draw customer attention. This exercise examines one type of item—breakfast cereal. Typically, in large grocery stores, boxes of cereal are placed on sets of shelves located on one side of the aisle. By placing particular boxes of cereals on specific shelves, grocery stores may better attract customers to them. To investigate this further, a random sample of size 10 was taken from each of four shelves at a Dillons grocery store in Manhattan, KS. These data are given in the *cereal_dillons.csv *file. The response variable is the shelf number, which is numbered from bottom (1) to top (4), and the explanatory variables are the sugar, fat, and sodium content of the cereals.*
+
+```{r, warning=FALSE, message=FALSE}
+cereal <- read.csv("cereal_dillons.csv", header=TRUE, sep=",")
+```
+
+**1.1 (1 point):** The explanatory variables need to be reformatted before proceeding further (sample code is provided in the textbook). First, divide each explanatory variable by its serving size to account for the different serving sizes among the cereals. Second, rescale each variable to be within 0 and 1. Construct side-by-side box plots with dot plots overlaid for each of the explanatory variables. Also, construct a parallel coordinates plot for the explanatory variables and the shelf number. Discuss whether possible content differences exist among the shelves.
+
+### From the Box Plot we observe
+  * Sodium is highest in cereals on Shelf 1 and lower on Shelf 2,3,4
+  * Sugar is highest in cereals on Shelf 2 and lowest on Shelf 3, 4
+  * Fat is highest in cereals on Shelf 2 and lowest on Shelf 1,3
+
+### From the Parallel Coordinate Plot we observe
+  * Shelf 1 generally has cereal highest in sodium content and generally low in fat
+  * Shelf 2 generally has cereal with highest in sugar content with mixed bag of sodium and fat
+  * Shelf 3 and Shelf 4 has cereal with mixed bag of sodium, sugar, and fat
+
+```{r, warning=FALSE, message=FALSE}
+
+#rescale variables between 0 and 1
+stand01 <- function(x) {
+  (x-min(x))/(max(x)-min(x))
+}
+
+#create new dataframe with rescaled variables
+cereal.data <- data.frame(
+  Shelf = cereal$Shelf,
+  sugar = stand01(x = cereal$sugar_g/cereal$size_g),
+  fat = stand01(x = cereal$fat_g/cereal$size_g),
+  sodium = stand01(x = cereal$sodium_mg/cereal$size_g)
+  )
+
+#conduct basic EDA
+str(cereal.data)
+summary(cereal.data)
+#skim(cereal.data)
+describe(cereal.data)
+cereal[!complete.cases(cereal),]
+sapply(cereal, function(x) sum(is.na(x)))
+
+#box plots
+sugar_plot <- ggplot(data = cereal.data) + 
+  aes(x = factor(Shelf), y = sugar) +  
+  geom_boxplot(aes(fill = factor(Shelf)), show.legend = FALSE) + 
+  geom_jitter() +
+  ggtitle("Sugar") +
+  xlab("Shelf") +
+  theme(plot.title = element_text(lineheight=1, face="bold")) 
+
+fat_plot <- ggplot(data = cereal.data) + 
+  aes(x = factor(Shelf), y = fat) +  
+  geom_boxplot(aes(fill = factor(Shelf)), show.legend = FALSE) + 
+  geom_jitter() +
+  ggtitle("Fat") +
+  xlab("Shelf") +
+  theme(plot.title = element_text(lineheight=1, face="bold")) 
+
+sodium_plot <- ggplot(data = cereal.data) + 
+  aes(x = factor(Shelf), y = sodium) +  
+  geom_boxplot(aes(fill = factor(Shelf)), show.legend = FALSE) + 
+  geom_jitter() +
+  ggtitle("Sodium") +
+  xlab("Shelf") +
+  theme(plot.title = element_text(lineheight=1, face="bold")) 
+
+library(patchwork)
+sodium_plot + sugar_plot + fat_plot
+
+#Parallel Coordinate Plot
+cereal.data$Shelf <- factor(cereal.data$Shelf)
+library(GGally)
+ggparcoord(cereal.data, 
+           columns = 2:4, 
+           groupColumn = "Shelf",
+           order = "anyClass",
+           showPoints = TRUE,
+           title = "Parallel Coordinate Plot for Cereal Data",
+           alphaLines = 0.5
+           )
+```
+
+**1.2 (1 point):** The response has values of $1, 2, 3,$ and $4$. Explain under what setting would it be desirable to take into account ordinality, and whether you think that this setting occurs here. Then estimate a suitable multinomial regression model with linear forms of the sugar, fat, and sodium variables. Perform LRTs to examine the importance of each explanatory variable. Show that there are no significant interactions among the explanatory variables (including an interaction among all three variables).
+
+**In order to maximize sales, items within grocery stores are strategically placed to draw customer attention. Though there is a physical order to these shelves, with 1 being at the bottom and 4 being at the top, we do not know if one shelf is better than another for drawing customer attention. Depending on the height of the shelve, depending on the height of customers, preference for one shelve over another may not follow the physical order. For example, we do not know if there is much of a difference between shelf 2 and shelf 3 when it comes to attracting customer attention. Also, we do not know if shelf 1 and shelf 4 are worse than shelf 2 and shelf 3. Also, we do not know if shelf 1 is preferred to shelf 4 or is it other way around. Thus, because we cannot assume an order among shelves for the purposes of drawing customer attention, we do not consider shelf as the ordinal variable. Instead we assume it to be a multinomial categorical variable.**
+
+The estimated regressions are
+
+**Equation 1: Shelf2 vs. Shelf1**
+$$
+log \left( \frac{\widehat{\pi}_{Shelf2}}{\widehat{\pi}_{Shelf1}} \right) = 6.9 - 17.5sodium + 2.7sugar + 4.1fat
+$$
+
+**Equation 2: Shelf3 vs. Shelf1**
+$$
+log \left( \frac{\widehat{\pi}_{Shelf3}}{\widehat{\pi}_{Shelf1}} \right) = 21.7 - 25sodium - 12.2sugar - 0.6fat
+$$
+**Equation 3: Shelf4 vs. Shelf1**
+
+$$
+log \left( \frac{\widehat{\pi}_{Shelf4}}{\widehat{\pi}_{Shelf1}} \right) = 21.3 - 24.7sodium - 11.4sugar - 0.9fat
+$$
+```{r, warning=FALSE, message=FALSE}
+# We look at sodium as the only dependent variable 
+cereal.multinom <- multinom(formula = Shelf ~ sodium, data = cereal.data)
+summary(cereal.multinom)
+#Calculate significance of sodium to all the categories
+Anova(cereal.multinom)
+#Calculate significance of sodium for each individual category
+(z_stat <- as.numeric(coef(cereal.multinom)[1,2])/
+    as.numeric(sqrt(diag(vcov(cereal.multinom)))[2]))
+(z_stat <- as.numeric(coef(cereal.multinom)[2,2])/
+    as.numeric(sqrt(diag(vcov(cereal.multinom)))[4]))
+(z_stat <- as.numeric(coef(cereal.multinom)[3,2])/
+    as.numeric(sqrt(diag(vcov(cereal.multinom)))[6]))
+# We conclude sodium is important as explanatory variable
+
+# We look at sugar as the only dependent variable 
+cereal.multinom <- multinom(formula = Shelf ~ sugar, data = cereal.data)
+summary(cereal.multinom)
+#Calculate significance of sugar to all the categories
+Anova(cereal.multinom)
+#Calculate significance of sugar for each individual category
+(z_stat <- as.numeric(coef(cereal.multinom)[1,2])/
+    as.numeric(sqrt(diag(vcov(cereal.multinom)))[2]))
+(z_stat <- as.numeric(coef(cereal.multinom)[2,2])/
+    as.numeric(sqrt(diag(vcov(cereal.multinom)))[4]))
+(z_stat <- as.numeric(coef(cereal.multinom)[3,2])/
+    as.numeric(sqrt(diag(vcov(cereal.multinom)))[6]))
+# We conclude sugar is marginally important as explanatory variable
+# We conclude sugar is significantly important in explaining Shelf 2 over Shelf 1
+
+# We look at fat as the only dependent variable 
+cereal.multinom <- multinom(formula = Shelf ~ fat, data = cereal.data)
+summary(cereal.multinom)
+#Calculate significance of fat to all the categories
+Anova(cereal.multinom)
+#Calculate significance of fat for each individual category
+(z_stat <- as.numeric(coef(cereal.multinom)[1,2])/
+    as.numeric(sqrt(diag(vcov(cereal.multinom)))[2]))
+(z_stat <- as.numeric(coef(cereal.multinom)[2,2])/
+    as.numeric(sqrt(diag(vcov(cereal.multinom)))[4]))
+(z_stat <- as.numeric(coef(cereal.multinom)[3,2])/
+    as.numeric(sqrt(diag(vcov(cereal.multinom)))[6]))
+# We conclude fat is not important as explanatory variable
+
+# We look at sugar, sodium, fat and their interaction as dependent variable 
+cereal.multinom <- multinom(formula = Shelf ~ sodium + sugar + fat + 
+                              sodium:sugar + sodium:fat + sugar:fat + 
+                              sodium:sugar:fat, data = cereal.data, 
+                            maxit = 7500, trace = FALSE)
+summary(cereal.multinom)
+Anova(cereal.multinom)
+# We conclude interactions is not important as explanatory variable
+
+# We look at sodium, sugar, fat as the only dependent variable as the final model.
+cereal.multinom <- multinom(formula = Shelf ~ sodium + sugar + 
+                              fat, data = cereal.data)
+summary(cereal.multinom)
+# We notice fat does not play a significant role
+Anova(cereal.multinom)
+#Sodium
+(z_stat <- as.numeric(coef(cereal.multinom)[1,2])/
+    as.numeric(sqrt(diag(vcov(cereal.multinom)))[2]))
+(z_stat <- as.numeric(coef(cereal.multinom)[2,2])/
+    as.numeric(sqrt(diag(vcov(cereal.multinom)))[6]))
+(z_stat <- as.numeric(coef(cereal.multinom)[3,2])/
+    as.numeric(sqrt(diag(vcov(cereal.multinom)))[10]))
+#Sugar
+(z_stat <- as.numeric(coef(cereal.multinom)[1,3])/
+    as.numeric(sqrt(diag(vcov(cereal.multinom)))[3]))
+(z_stat <- as.numeric(coef(cereal.multinom)[2,3])/
+    as.numeric(sqrt(diag(vcov(cereal.multinom)))[7]))
+(z_stat <- as.numeric(coef(cereal.multinom)[3,3])/
+    as.numeric(sqrt(diag(vcov(cereal.multinom)))[11]))
+#Fat
+(z_stat <- as.numeric(coef(cereal.multinom)[1,4])/
+    as.numeric(sqrt(diag(vcov(cereal.multinom)))[4]))
+(z_stat <- as.numeric(coef(cereal.multinom)[2,4])/
+    as.numeric(sqrt(diag(vcov(cereal.multinom)))[8]))
+(z_stat <- as.numeric(coef(cereal.multinom)[3,4])/
+    as.numeric(sqrt(diag(vcov(cereal.multinom)))[12]))
+# We notice sodium to be most important, followed by sugar, followed by fat
+```
+
+**1.3 (1 point):** Kellogg’s Apple Jacks (http://www.applejacks.com) is a cereal marketed toward children. For a serving size of $28$ grams, its sugar content is $12$ grams, fat content is $0.5$ grams, and sodium content is $130$ milligrams. Estimate the shelf probabilities for Apple Jacks.
+
+### We predict Shelf 2 for this Kellogg's Apple Jacks Cereal.
+
+```{r, warning=FALSE, message=FALSE}
+
+#Create Test Data by binding it to the original data
+test.cereal <- rbind(cereal, data.frame(ID = 0, Shelf = 0, 
+                     Cereal = "Apple Jacks", size_g = 28, 
+                      sugar_g = 12, fat_g = 0.5, sodium_mg = 130))
+
+#Pre-process Test Data alongside the original data
+test.cereal.data <- data.frame(Shelf = test.cereal$Shelf,
+                sugar = stand01(x = test.cereal$sugar_g/test.cereal$size_g),
+                fat = stand01(x = test.cereal$fat_g/test.cereal$size_g),
+                sodium = stand01(x = test.cereal$sodium_mg/test.cereal$size_g)
+                               )
+
+#Train the model on the original cereal data
+cereal.multinom <- multinom(formula = Shelf ~ sodium + sugar + fat, 
+                            data = cereal.data, trace = FALSE)
+
+#Predict the model for the new data
+test.cereal[41,] #Raw Data
+test.cereal.data[41,] #Pre-processed data
+round(predict(object = cereal.multinom, newdata = test.cereal.data[41,2:4], 
+              type = "probs"),3)
+predict(object = cereal.multinom, newdata = test.cereal.data[41,2:4], 
+        type = "class")
+#We predict Shelf 2
+```
+
+**1.4 (1 point):** Construct a plot similar to Figure 3.3 where the estimated probability for a shelf is on the *y-axis* and the sugar content is on the *x-axis*. Use the mean overall fat and sodium content as the corresponding variable values in the model. Interpret the plot with respect to sugar content.
+
+**From the plot we can see if the sugar is low within a cereal then the ceral is typically placed on Shelf3 and Shelf4 instead of Shelf1 and Shelf2. However as the sugar content increases, the cereal is placed on Shelf1 and Shelf2 with Shelf2 dominating. From this plot we can see how Shelf2 is the preferred shelf for high sugar content. Specifically for sugar less than 0.5mg/serving we find the cereal on Shelf3 and Shelf4 provided sodium and fat stays constant. For sugar more than 0.75mg/serving we find the cereal on Shelf2 provided sodium and fat stays constant**
+
+```{r, warning=FALSE, message=FALSE}
+cereal.multinom <- multinom(formula = Shelf ~ sodium + sugar + fat, 
+                            data = cereal.data)
+summary(cereal.multinom)
+Anova(cereal.multinom)
+
+sodium.mean <- mean(cereal.data$sodium)
+fat.mean <- mean(cereal.data$fat)
+beta.hat<-coefficients(cereal.multinom)
+a <- seq(0,1,length = 1000)
+b0 <- 1/(1 + exp(beta.hat[1,1] + beta.hat[1,2]*sodium.mean + beta.hat[1,3]*a + beta.hat[1,4]*fat.mean) + 
+            exp(beta.hat[2,1] + beta.hat[2,2]*sodium.mean + beta.hat[2,3]*a + beta.hat[2,4]*fat.mean) +
+            exp(beta.hat[3,1] + beta.hat[3,2]*sodium.mean + beta.hat[3,3]*a + beta.hat[3,4]*fat.mean))
+b1 <- (exp(beta.hat[1,1] + beta.hat[1,2]*sodium.mean + beta.hat[1,3]*a + 
+             beta.hat[2,4]*fat.mean))/
+      (1+ exp(beta.hat[1,1] + beta.hat[1,2]*sodium.mean + beta.hat[1,3]*a + beta.hat[1,4]*fat.mean) + 
+          exp(beta.hat[2,1] + beta.hat[2,2]*sodium.mean + beta.hat[2,3]*a + beta.hat[2,4]*fat.mean) +
+          exp(beta.hat[3,1] + beta.hat[3,2]*sodium.mean + beta.hat[3,3]*a + beta.hat[3,4]*fat.mean))
+b2 <- (exp(beta.hat[2,1] + beta.hat[2,2]*sodium.mean + beta.hat[2,3]*a + 
+             beta.hat[2,4]*fat.mean))/
+  (1+ exp(beta.hat[1,1] + beta.hat[1,2]*sodium.mean + beta.hat[1,3]*a + 
+            beta.hat[1,4]*fat.mean) + 
+     exp(beta.hat[2,1] + beta.hat[2,2]*sodium.mean + beta.hat[2,3]*a + 
+           beta.hat[2,4]*fat.mean) +
+     exp(beta.hat[3,1] + beta.hat[3,2]*sodium.mean + beta.hat[3,3]*a + 
+           beta.hat[3,4]*fat.mean))
+b3 <- (exp(beta.hat[3,1] + beta.hat[3,2]*sodium.mean + beta.hat[3,3]*a + 
+             beta.hat[3,4]*fat.mean))/
+  (1+ exp(beta.hat[1,1] + beta.hat[1,2]*sodium.mean + beta.hat[1,3]*a + 
+            beta.hat[1,4]*fat.mean) + 
+     exp(beta.hat[2,1] + beta.hat[2,2]*sodium.mean + beta.hat[2,3]*a + 
+           beta.hat[2,4]*fat.mean) +
+     exp(beta.hat[3,1] + beta.hat[3,2]*sodium.mean + beta.hat[3,3]*a + 
+           beta.hat[3,4]*fat.mean))
+#plot(a,b0)
+#plot(a,b1)
+#plot(a,b2)
+#plot(a,b3)
+sodium <- rep(mean(cereal.data$sodium),1000)
+sugar <- seq(0,1,length = 1000)
+fat <- rep(mean(cereal.data$fat),1000)
+test.data <- data.frame(sodium, sugar, fat)
+predict.data <- predict(object = cereal.multinom, newdata = test.data, type = "probs")
+sugar.data <- data.frame(sugar = sugar, predict.data)
+#plot(sugar,sugar.data[,2])
+#plot(sugar,sugar.data[,3])
+#plot(sugar,sugar.data[,4])
+#plot(sugar,sugar.data[,5])
+ggplot(data = sugar.data) + 
+  aes(x = sugar) +  
+  geom_line(aes(y = X1, color="Shelf 1"), linetype="solid") + 
+  geom_line(aes(y = X2, color="Shelf 2"), linetype="solid") + 
+  geom_line(aes(y = X3, color="Shelf 3"), linetype="solid") + 
+  geom_line(aes(y = X4, color="Shelf 4"), linetype="solid") + 
+  scale_color_manual(values = c(
+    'Shelf 1' = 'blue',
+    'Shelf 2' = 'black',
+    'Shelf 3' = 'red',
+    'Shelf 4' = 'green')) +
+  ggtitle("Sugar") +
+  xlab("sugar") +
+  ylab("probability") +
+  theme(plot.title = element_text(lineheight=1, face="bold")) 
+```
+
+
+**1.5 (1 point):** Estimate odds ratios and calculate corresponding confidence intervals for each explanatory variable. Relate your interpretations back to the plots constructed for this exercise. 
+**The estimated odd of Shelf2 over Shelf1 change by 0.01 times for a 0.27 increase in sugar holding other variables constant. The estimated odd of Shelf3 over Shelf1 change by 0.0 times for a 0.27 increase in sugar holding other variables constant. The estimated odd of Shelf4 over Shelf1 change by 0.01 times for a 0.27 increase in sugar holding other variables constant**
+
+**With 95% confidence, the odds of Shelf2 over Shelf1 changes by (0.12, 43.21) when sugar increase by 0.27. With 95% confidence, the odds of Shelf3 over Shelf1 changes by (0.0, 0.45) when sugar increase by 0.27. With 95% confidence, the odds of Shelf4 over Shelf1 changes by (0.0, 0.58) when sugar increase by 0.27.**
+
+```{r, warning=FALSE, message=FALSE}
+sd.cereal <- apply(X = cereal.data[,c(2:4)], MARGIN = 2, FUN = sd)
+c.value <- c(1, sd.cereal)
+round(c.value,2)
+
+beta2 <- coef(cereal.multinom)[1,1:4]
+beta3 <- coef(cereal.multinom)[2,1:4]
+beta4 <- coef(cereal.multinom)[3,1:4]
+
+round(exp(c.value*beta2),2)
+#round(1/exp(c.value*beta2),2)
+
+round(exp(c.value*beta3),2)
+#round(1/exp(c.value*beta3),2)
+
+round(exp(c.value*beta4),2)
+#round(1/exp(c.value*beta4),2)
+
+conf.beta <- confint(object = cereal.multinom, level = 0.95)
+
+ci.OR2 <- exp(c.value * conf.beta[1:4,1:2,1])
+round(ci.OR2,2)
+
+ci.OR3 <- exp(c.value * conf.beta[1:4,1:2,2])
+round(ci.OR3,2)
+
+ci.OR4 <- exp(c.value * conf.beta[1:4,1:2,3])
+round(ci.OR4,2)
+```
+
+\newpage
+# 2. Alcohol, self-esteem and negative relationship interactions (5 points)
+
+Read the example **'Alcohol Consumption'** in chapter 4.2.2 of the textbook. This is based on a study in which moderate-to-heavy drinkers (defined as at least 12 alcoholic drinks/week for women, 15 for men) were recruited to keep a daily record of each drink that they consumed over a 30-day study period. Participants also completed a variety of rating scales covering daily events in their lives and items related to self-esteem. The data are given in the *DeHartSimplified.csv *data set. Questions 24-26 of chapter 3 of the textbook also relate to this data set and give definitions of its variables: the number of drinks consumed (`numall`), positive romantic-relationship events (`prel`), negative romantic-relationship events (`nrel`), age (`age`), trait (long-term) self-esteem (`rosn`), state (short-term) self-esteem (`state`).
+
+The researchers stated the following hypothesis:
+
+*We hypothesized that negative interactions with romantic partners would be associated with alcohol consumption (and an increased desire to drink). We predicted that people with low trait self-esteem would drink more on days they experienced more negative relationship interactions compared with days during which they experienced fewer negative relationship interactions. The relation between drinking and negative relationship interactions should not be evident for individuals with high trait self-esteem.*
+
+```{r, warning=FALSE, message=FALSE}
+dehart <- read.table(file = "DeHartSimplified.csv", header=TRUE, sep=",")
+```
+
+**2.1 (2 points):** Conduct a thorough EDA of the data set, giving special attention to the relationships relevant to the researchers' hypotheses. Address the reasons for limiting the study to observations from only one day.
+
+**We choose one dayof the week for our study because the response variable we are interested is $numall$ which is a number between 0 and $n$. Thus, we can analyze $numall$ using Poisson distribution. To analyze using Poisson distribution we want to assume the same intensity from period to period and the period remains constant from one observation to observation. If we were not to keep our unit of observation to one day of the week than the desire to drink (intensity) will vary from observation to observation and our assumptions for Poisson distribution will be violated. In our analysis, we notice $Saturdays$ is when the data is most rich and there are least number of $0$ drinks on $Saturday$. Thus our unit observation for this analysis is number of drinks consumed by each individual on $Saturdays$ and we assume the desire to drink on Saturday (intensity) is constant from Saturday to Saturday which is a reasonabale assumption.**
+
+**We also perform EDA to understand the data. The response variable can be modeled using Poisson distribution however we see compared to a theoretical poisoon distribution we see fewer data points with 3 or 4 drinks. Also, we note most of the explanatory variables are skewed. Lastly, when we analyze the scatter plots of $numall$ against $nrel$ for low, medium, high self-esteem individual we see a pattern emerge which shows for individuals with low self-esteem there is a strong relationship between $numall$ and $nrel$**
+
+```{r, warning=FALSE, message=FALSE}
+# We want to first check if there are missing values
+dehart[!complete.cases(dehart),]
+
+# We notice there are missing values for 1,3,5,7 but not for 6
+
+# We subset the data to variables that are important to the researcher
+dehart.data <- dehart[dehart$dayweek == 6, c(3,4,5,7,10,12)]
+
+# We ensure there are no missing values for the subset data
+dehart.data[!complete.cases(dehart.data),]
+
+# We chedk the data structure for the data
+str(dehart.data)
+
+# We summarize the data
+summary(dehart.data)
+
+#We analyze the response variable and key explanatory variables
+describe(dehart.data$numall)
+describe(dehart.data$nrel)
+describe(dehart.data$negevent)
+describe(dehart.data$rosn)
+
+#We notice frequency for 3 or 4 drinks is low comparatively but could be due to chance
+table(dehart.data$numall)
+
+head(dehart.data)
+tail(dehart.data)
+```
+
+```{r, warning=FALSE, message=FALSE}
+# We want to analyze the data against theoritical Poisson distribution
+mu.hat <- mean(dehart.data$numall)
+mu.var <- var(dehart.data$numall)
+alpha <- 0.05
+n <-  length(dehart.data$numall)
+x <- seq(0,21, by = 1)
+rel.freq <- table(dehart.data$numall)/length(dehart.data$numall)
+rel.freq <- c(rel.freq, rep(0, times = 7))
+theory.prob <- dpois(x = x, lambda = mean(dehart.data$numall))
+dehart.prob <- data.frame(x, theory.prob, rel.freq)
+par(mfrow = c(2,1))
+plot(dehart.prob$x, dehart.prob$theory.prob, type = "h",
+     ylab = "Theoretical Probability", xlab = "Number of Drinks", col = "black")
+plot(dehart.prob$x, dehart.prob$rel.freq, type = "h",
+     ylab = "Observed Probability", xlab = "Number of Drinks", col = "red")
+par(mfrow = c(1,1))
+
+#We calculate the confidence interval for mean and variance
+(wald.int <- mu.hat + qnorm(p = c(alpha/2, 1-alpha/2)) * sqrt(mu.hat/n))
+as.numeric(t.test(dehart.data$numall, conf.level = 0.95)$conf.int)
+```
+
+```{r, warning=FALSE, message=FALSE}
+#We analyze the histogram of response and key explanatory variables
+#We notice few data points with low self esteem trait
+#We notice most of the negative romantic relationship data points are zero
+numall_hist <- dehart.data %>%
+  ggplot(aes(numall)) +
+  geom_histogram()
+nrel_hist <- dehart.data %>%
+  ggplot(aes(nrel)) +
+  geom_histogram()
+negevent_hist <- dehart.data %>%
+  ggplot(aes(negevent)) +
+  geom_histogram()
+rosn_hist <- dehart.data %>%
+  ggplot(aes(rosn)) +
+  geom_histogram()
+library(patchwork)
+(numall_hist + nrel_hist) / (negevent_hist + rosn_hist)
+
+#We analyze relationship between response and explanatory variable
+#We see a positive relationship between numall and desired as expected
+#We see a surprising negative relationships between numall and negevent
+#We see a positive relationship between numall and nrel as expected
+#We do not see any relationship between self esteem trait and nrel
+nrel_numall <- dehart.data %>%
+  ggplot(aes(x = nrel, y = numall)) +
+  geom_jitter() +
+  geom_smooth(method = "lm", se = FALSE) +
+  labs(y = "Number of Drinks", x = "Negative Relationship")
+
+negevent_numall <- dehart.data %>%
+  ggplot(aes(x = negevent, y = numall)) +
+  geom_jitter() +
+  geom_smooth(method = "lm", se = FALSE) +
+  labs(y = "Number of Drinks", x = "Negative Event")
+
+rosn_numall <- dehart.data %>%
+  ggplot(aes(x = rosn, y = numall)) +
+  geom_jitter() +
+  geom_smooth(method = "lm", se = FALSE) +
+  labs(y = "Number of Drinks", x = "Trait")
+
+desired_numall <- dehart.data %>%
+  ggplot(aes(x = desired, y = numall)) +
+  geom_jitter() +
+  geom_smooth(method = "lm", se = FALSE) +
+  labs(y = "Number of Drinks", x = "Desired")
+
+(nrel_numall + negevent_numall) / (rosn_numall + desired_numall)
+
+#Because of research question we further break down the self esteem data
+#We look at the different quartile for rosn and accordingly bin the data
+#We create a categorical variable trait
+summary(dehart.data$rosn)
+dehart.data <- dehart.data %>%
+  mutate(trait = case_when(
+    rosn <= 3.2 ~ "Low",
+    rosn > 3.2 & rosn < 3.8 ~ "Medium",
+    rosn >= 3.8 ~ "High"))
+dehart.data$trait <- factor(dehart.data$trait, level = c("Low", "Medium", "High"))
+head(dehart.data)
+tail(dehart.data)
+
+#Because of research question we look at relationship between numall and nrel
+#For each bin we notice a different relation between numall and nrel
+#We notice a strong positive relationship between numall and nrel for low esteem
+#We notice a slight positive relationship between numall and nrel for high esteem
+dehart.data %>%
+  ggplot(aes(x = nrel, y = numall)) +
+  geom_jitter() +
+  geom_smooth(method = "lm", se = FALSE) +
+  labs(y = "Number of Drinks", x = "Negative Relationship") +
+  facet_wrap(~ trait)
+```
+
+**2.2 (2 points):** The researchers hypothesize that negative interactions with romantic partners would be associated with alcohol consumption and an increased desire to drink. Using appropriate models, evaluate the evidence that negative relationship interactions are associated with higher alcohol consumption and an increased desire to drink. 
+
+**We find there is no significant relationship between $numall$ and $nrel$ when we run regression. If any relationship exists it is by chance. We then add self esteem $rosn$ to the model and find no significant relationship between $numall$ and $nrel$ when controlling for $rosn$. However when we add $negevent$ along with $nrel$ we find both $nrel$ to be marginally significant and $negevent$ to be strongly significant. Thus, we use this model to explore further. Using this model we find the following relationship:**
+
+$$
+log \left( numall \right) = 1.52221 + 0.12815nrel - 0.39634negevent
+$$
+
+**This leads to 13.67% percent change in $numall$ from a unit change in $nrel$ while controlling for $negevent$. And the 95% confidence interval for this change is (0.8%, 27.4%). We notice zero is excluded from the confidence interval. We plot this relationship between $numall$ and $nrel$ for three different values (min, max, mean) of $negevent$. From the plot, we notice as the $numevent$ increases the relationship between $numall$ and $nrel$ becomes more significant. As Without $negevent$ the relationship between $numall$ and $nrel$ is not significant.**
+
+**We also explore the relationship between $numall$ and $desirded$ and plot this relationship. This is a strongly significant relationship.**
+
+```{r, warning=FALSE, message=FALSE}
+
+#We see the relationship between nrel and numall is not significant
+#Thus this relationship can be due to chance
+dehart.poisson.model <- glm(numall ~ nrel, family = poisson(link = "log"), 
+                            data = dehart.data)
+summary(dehart.poisson.model)
+Anova(dehart.poisson.model, test = "LR")
+
+#When we control for rosn, we still see no relationship between nrel and numall
+dehart.poisson.model <- glm(numall ~ nrel + rosn, family = poisson(link = "log"), 
+                            data = dehart.data)
+summary(dehart.poisson.model)
+Anova(dehart.poisson.model, test = "LR")
+
+#When we control for negevent
+#We see a marginal relationship between nrel and numall
+dehart.poisson.model <- glm(numall ~ nrel + negevent, family = poisson(link = "log"), 
+                            data = dehart.data)
+summary(dehart.poisson.model)
+Anova(dehart.poisson.model, test = "LR")
+
+100*(exp(dehart.poisson.model$coefficients[2]) -1)
+100*(exp(dehart.poisson.model$coefficients[3]) -1)
+beta1.int <- confint(dehart.poisson.model, parm = "nrel", level = 0.95)
+beta2.int <- confint(dehart.poisson.model, parm = "negevent", level = 0.95)
+100*(exp(beta1.int) -1)
+100*(exp(beta2.int) -1)
+
+x_nrel <- seq(0,10,0.01)
+max_negevent <- rep(max(dehart.data$negevent), 1001)
+min_negevent <- rep(min(dehart.data$negevent), 1001)
+mean_negevent <- rep(mean(dehart.data$negevent), 1001)
+y.max <- exp(dehart.poisson.model$coefficients[1] + 
+           dehart.poisson.model$coefficients[2] * x_nrel +
+           dehart.poisson.model$coefficients[3] * max_negevent)
+y.min <- exp(dehart.poisson.model$coefficients[1] + 
+           dehart.poisson.model$coefficients[2] * x_nrel +
+           dehart.poisson.model$coefficients[3] * min_negevent)
+y.mean <- exp(dehart.poisson.model$coefficients[1] + 
+           dehart.poisson.model$coefficients[2] * x_nrel +
+           dehart.poisson.model$coefficients[3] * mean_negevent)
+
+numall_nrel_df <- data.frame(nrel = x_nrel, numall.max = y.max, 
+                             numall.min = y.min, numall.mean = y.mean)
+                             
+numall_nrel_plot <- numall_nrel_df %>%
+  ggplot() + 
+  aes(x = nrel) +  
+  geom_line(aes(y = numall.max, color="With max(numevent) = 2.38"), linetype="solid") + 
+  geom_line(aes(y = numall.min, color="With min(numevent) = 0.0"), linetype="solid") + 
+  geom_line(aes(y = numall.mean,color="With mean(numevent) = 0.44"), linetype="solid") + 
+  scale_color_manual(values = c(
+    'With max(numevent) = 2.38' = 'blue',
+    'With min(numevent) = 0.0' = 'red',
+    'With mean(numevent) = 0.44' = 'black')) +
+  ggtitle("Number of Drinks vs. Negative Relationship") +
+  xlab("Negative Relationship") +
+  ylab("Number of Drinks") +
+  theme(plot.title = element_text(lineheight=1, face="bold"))
+
+#When we control for desired
+#We see a marginal relationship between nrel and numall
+dehart.poisson.model <- glm(numall ~ desired, family = poisson(link = "log"), 
+                            data = dehart.data)
+summary(dehart.poisson.model)
+Anova(dehart.poisson.model, test = "LR")
+100*(exp(dehart.poisson.model$coefficients[2]) -1)
+beta1.int <- confint(dehart.poisson.model, parm = "desired", level = 0.95)
+100*(exp(beta1.int) -1)
+
+x_desired <- seq(0,10,0.01)
+y <- exp(dehart.poisson.model$coefficients[1] + 
+           dehart.poisson.model$coefficients[2] * x_desired)
+numall_desired_df <- data.frame(desired = x_desired, numall = y)
+                             
+numall_desired_plot <- numall_desired_df %>%
+  ggplot() + 
+  aes(x = desired) +  
+  geom_line(aes(y = numall), linetype="solid") + 
+  ggtitle("Number of Drinks vs. Desired") +
+  xlab("Desired") +
+  ylab("Number of Drinks") +
+  theme(plot.title = element_text(lineheight=1, face="bold"))
+
+numall_nrel_plot / numall_desired_plot
+
+```
+
+**2.3 (1 points):** The researchers hypothesize that the relation between drinking and negative relationship interactions should not be evident for individuals with high trait self-esteem. Conduct an analysis to address this hypothesis.
+
+**Because we do not find a significant relationship between $numall$ and $rosn$, I break the data set into 2 parts. One with individuals that have low esteem and another with individual that have high esteem. Then I run regression to see if the relationship between $numall$ and $nrel$ is significant for the two data sets.**
+
+**For the data set that contains individuals with low self esteem, the relationship between $numall$ and $nrel$ is significant. For the data set that contains individuals with high self esteem, the relationship between $numall$ and $nrel$ is not significant. This is what the researcher expected as well. Thus, we have the following relationship for individuals with low self esteem.**
+
+$$
+log \left( numall \right) = 1.3888 + 0.2881nrel
+$$
+**This leads to 33.40% percent change in $numall$ from a unit change in $nrel$ for individuals with low self esteem (less than equal to 3.2). And the 95% confidence interval for this change is (6.8%, 62.4%). We notice zero is excluded from the confidence interval. We plot this relationship between $numall$ and $nrel$ for data set that has low self esteem and compare the plot with data set that has high self esteem. From the plot, we notice for low self esteem, drastic increase in drinking with unit increase in negative relationship.**
+
+
+```{r, warning=FALSE, message=FALSE}
+dehart.data.low <- dehart.data[dehart.data$trait == "Low",]
+dehart.poisson.model <- glm(numall ~ nrel, family = poisson(link = "log"), 
+                            data = dehart.data.low)
+summary(dehart.poisson.model)
+Anova(dehart.poisson.model)
+100*(exp(dehart.poisson.model$coefficients[2]) -1)
+beta1.int <- confint(dehart.poisson.model, parm = "nrel", level = 0.95)
+100*(exp(beta1.int) -1)
+
+x_nrel <- seq(0,10, 0.01)
+y_low <- exp(dehart.poisson.model$coefficients[1] + 
+           dehart.poisson.model$coefficients[2] * x_nrel)
+
+dehart.data.high <- dehart.data[dehart.data$trait == "High",]
+dehart.poisson.model <- glm(numall ~ nrel, family = poisson(link = "log"), 
+                            data = dehart.data.high)
+summary(dehart.poisson.model)
+Anova(dehart.poisson.model)
+100*(exp(dehart.poisson.model$coefficients[2]) -1)
+beta1.int <- confint(dehart.poisson.model, parm = "nrel", level = 0.95)
+100*(exp(beta1.int) -1)
+
+x_nrel <- seq(0,10, 0.01)
+y_high <- exp(dehart.poisson.model$coefficients[1] + 
+           dehart.poisson.model$coefficients[2] * x_nrel)
+
+numall_nrel_df <- data.frame(nrel = x_nrel, numall.low.rosn = y_low, 
+                             numall.high.rosn = y_high)
+                             
+numall_nrel_df %>%
+  ggplot() + 
+  aes(x = nrel) +  
+  geom_line(aes(y = numall.low.rosn, color="With Low Self Esteem"), linetype="solid") + 
+  geom_line(aes(y = numall.high.rosn, color="With High Self Esteem"), linetype="solid") + 
+  scale_color_manual(values = c(
+    'With Low Self Esteem' = 'red',
+    'With High Self Esteem' = 'black')) +
+  ggtitle("Number of Drinks vs. Negative Relationship") +
+  xlab("Negative Relationship") +
+  ylab("Number of Drinks") +
+  theme(plot.title = element_text(lineheight=1, face="bold"))
+```
